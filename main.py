@@ -1,69 +1,89 @@
 import os
-from streamlit_chat import message
 import streamlit as st
-from dotenv import load_dotenv
-from langchain_experimental.agents.agent_toolkits import create_csv_agent
-from langchain_openai import OpenAI
+import bs4 # Beautiful soup
+from langchain import hub # NLP related stuffs
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import WebBaseLoader
+from langchain_community.vectorstores import Chroma # Similarity search and indexing
+from langchain_core.output_parsers import StrOutputParser # Parse answer to desirable output (my guess is embed -> NL)
+from langchain_core.runnables import RunnablePassthrough
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain.prompts import ChatPromptTemplate
 
-def submit():
-    st.session_state['input'] = st.session_state['query']
-    st.session_state['query'] = ''
+# Load documents
+def load_documents():
+    loader = WebBaseLoader(
+        web_paths=("https://luatvietnam.vn/y-te/luat-bao-hiem-y-te-2008-39053-d1.html",),
+        bs_kwargs=dict(
+            parse_only=bs4.SoupStrainer(class_=("the-document-body ndthaydoi noidungtracuu",))
+        ),
+    )
+    docs = loader.load()
+    return docs
 
-def main():
-    # Load environment variables from .env file
-    load_dotenv()
+# Split documents
+def split_documents(docs):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    splits = text_splitter.split_documents(docs)
+    return splits
 
-    # Get the OpenAI API key from the environment variable
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        st.error("OPENAI_API_KEY is not set. Please set it in your .env file.")
-        return
+# Embed documents
+def embed_documents(splits):
+    vectorstore = Chroma.from_documents(documents=splits, embedding=OpenAIEmbeddings())
+    return vectorstore
 
-    st.set_page_config(page_title="Ask your CSV")
-    st.header("Ask your CSV 📈")
+# Define the chat interface
+def chat_interface():
+    st.title("Chatbot Interface")
+    docs = load_documents()
+    splits = split_documents(docs)
+    vectorstore = embed_documents(splits)
+    st.session_state["vectorstore"] = vectorstore
 
-    # Initialize session state for requests and responses
-    if 'requests' not in st.session_state:
-        st.session_state['requests'] = []
-    if 'responses' not in st.session_state:
-        st.session_state['responses'] = []
-    if 'query' not in st.session_state:
-        st.session_state['query'] = ''
-    if 'input' not in st.session_state:
-        st.session_state['input'] = ''
+    # Input area for user questions
+    user_question = st.text_input("Ask a question:")
+    if user_question:
+        retriever = st.session_state["vectorstore"].as_retriever()
 
-    # File uploader for CSV files
-    csv_file = st.file_uploader("Upload a CSV file", type="csv")
-    if csv_file is not None:
-        # Create a CSV agent
-        try:
-            agent = create_csv_agent(
-                OpenAI(temperature=0, api_key=api_key), csv_file, verbose=True, allow_dangerous_code=True
-            )
-        except Exception as e:
-            st.error(f"Failed to create CSV agent: {e}")
-            return
+        # Define the conversational retrieval chain
+        llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+        
+        # Prompt
+        template = """
+            Bạn đang truy vấn từ cơ sở dữ liệu văn bản pháp luật Việt Nam. Dưới đây là câu hỏi cần bạn trả lời dựa trên các tài liệu pháp lý có sẵn. Hãy cung cấp câu trả lời một cách chính xác và chi tiết nhất có thể, trích dẫn các điều luật hoặc quy định liên quan nếu cần thiết.
 
-        # Container for chat history
-        response_container = st.container()
-        # Container for text box
-        textcontainer = st.container()
+            Hướng dẫn trả lời:
+            1. Đọc kỹ câu hỏi và xác định các từ khóa quan trọng.
+            2. Tìm kiếm các văn bản pháp luật liên quan đến câu hỏi.
+            3. Trích dẫn chính xác các điều luật, quy định hoặc văn bản pháp lý có liên quan.
+            4. Giải thích ngắn gọn nhưng đầy đủ để người hỏi hiểu rõ về điều luật hoặc quy định đó.
+            5. Nếu có thể, đưa ra ví dụ cụ thể hoặc tình huống áp dụng thực tế để minh họa.
 
-        with textcontainer:
-            query = st.text_input("Ask a question about your CSV:", key='query', on_change=submit)
-            if st.session_state['input']:
-                with st.spinner("Processing..."):
-                    response = agent.run(st.session_state['input'])
-                st.session_state.requests.append(st.session_state['input'])
-                st.session_state.responses.append(response)
-                st.session_state['input'] = ''
+            Câu hỏi: {question}
 
-        with response_container:
-            if st.session_state['responses']:
-                for i in range(len(st.session_state['responses'])):
-                    if i < len(st.session_state['requests']):
-                        message(st.session_state["requests"][i], is_user=True, key=str(i) + '_user')
-                    message(st.session_state['responses'][i], key=str(i))
+            Câu trả lời:
+        """
 
+        prompt = ChatPromptTemplate.from_template(template)
+
+
+        # Post-processing
+        def format_docs(docs):
+            return "\n\n".join(doc.page_content for doc in docs)
+
+        # Chain
+        rag_chain = (
+            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+    
+        # Get the answer
+        result = rag_chain.invoke(user_question)
+        st.write(result)
+
+# Run the chat interface
 if __name__ == "__main__":
-    main()
+    chat_interface()
+
