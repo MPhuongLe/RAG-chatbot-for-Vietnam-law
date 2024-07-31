@@ -10,7 +10,6 @@ from langchain_openai import OpenAI
 from langchain.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
-
 def submit():
     st.session_state['input'] = st.session_state['query']
     st.session_state['query'] = ''
@@ -39,7 +38,7 @@ def main():
         st.session_state['input'] = ''
 
     # File uploader for CSV files
-    text_file = st.file_uploader("Upload a text file", type="txt")
+    text_file = st.file_uploader("Upload a text file", type="json")
     if text_file is not None:
         # Create a CSV agent
         try:
@@ -49,7 +48,7 @@ def main():
             # prompt = ChatPromptTemplate.from_template(template)
 
             agent = create_openai_tools_agent(
-                ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0), tools, prompt
+                ChatOpenAI(model_name="gpt-4o", temperature=0), tools, prompt
             )
             agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
