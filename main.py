@@ -9,21 +9,45 @@ from langchain_core.output_parsers import StrOutputParser # Parse answer to desi
 from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.prompts import ChatPromptTemplate
+from langchain_core.documents.base import Document
+from langchain.document_loaders import PyPDFLoader
+
+
+# Custom TextFileLoader
+class TextFileLoader:
+    def __init__(self, file_path):
+        self.file_path = file_path
+
+    def load(self):
+        with open(self.file_path, 'r', encoding='utf-16') as file:
+            content = file.read()
+            doc = Document(page_content=content, metadata={'source':'https://luatvietnam.vn/y-te/luat-bao-hiem-y-te-2008-39053-d1.html'})
+        return [doc]
 
 # Load documents
 def load_documents():
-    loader = WebBaseLoader(
-        web_paths=("https://luatvietnam.vn/y-te/luat-bao-hiem-y-te-2008-39053-d1.html",),
-        bs_kwargs=dict(
-            parse_only=bs4.SoupStrainer(class_=("the-document-body ndthaydoi noidungtracuu", "docitem-5","docitem-11",))
-        ),
+    document_path = 'documents\luat-bao-hiem-y-te.txt'
+    loader = TextFileLoader(
+        file_path=document_path  # Update this path to your local text file
     )
     docs = loader.load()
     return docs
 
 # Split documents
 def split_documents(docs):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, separators=['Điều'])
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=80, separators=[
+        "\n\n",
+        "\n",
+        " ",
+        ".",
+        ",",
+        "\u200b",  # Zero-width space
+        "\uff0c",  # Fullwidth comma
+        "\u3001",  # Ideographic comma
+        "\uff0e",  # Fullwidth full stop
+        "\u3002",  # Ideographic full stop
+        "",
+    ],)
     splits = text_splitter.split_documents(docs)
     return splits
 
@@ -46,21 +70,32 @@ def chat_interface():
         retriever = st.session_state["vectorstore"].as_retriever()
 
         # Define the conversational retrieval chain
-        llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+        llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0, verbose=True)
         
         # Prompt
         template = """
-            Bạn đang truy vấn từ cơ sở dữ liệu văn bản pháp luật Việt Nam. Dưới đây là câu hỏi cần bạn trả lời dựa trên các tài liệu pháp lý có sẵn. Hãy cung cấp câu trả lời một cách chính xác và chi tiết nhất có thể, trích dẫn các điều luật hoặc quy định liên quan nếu cần thiết.
+            Bạn đang truy vấn từ cơ sở dữ liệu văn bản pháp luật Việt Nam. Dưới đây là câu hỏi cần bạn trả lời dựa trên các tài liệu pháp lý có sẵn. 
+            Hãy cung cấp câu trả lời một cách chính xác và chi tiết nhất có thể, trích dẫn các điều luật hoặc quy định liên quan nếu cần thiết.
+            Trước khi trả lời câu hỏi, bạn cần biết cấu trúc của 1 văn bản luật:
+            1. Phần mở đầu: Bao gồm tên bộ luật, tên cơ quan hành chính ban hành, ngày tháng ban hành, ký hiệu văn bản. Phần này bạn nên chú ý thời điểm luật được ban hành. Nội dung này sẽ ít được hỏi hơn.
+            2. Phần nội dung: Có bố cục như sau:
+                Chương, Điều, Khoản, điểm.
+                - Mỗi điểm chỉ thể hiện 1 ý và phải trình bày trong 1 câu hoặc đoạn.
+                - Chương, điều đều phải có tên chỉ nội dung chính.
+                - Chương sẽ bao gồm Điều. Điều bao gồm Khoản và điểm. 
+                - Chương được đánh số la mã. Điều được đánh số la tinh.
+                - Các khoản nằm trong điều thường có kí tự chữ cái la tinh ở đầu tiên. Ví dụ: "a)"
+                - Chú ý các đoạn văn bản với chữ đầu tiên là "Điều" với một số theo sau.
+            3. Kết thúc văn bản: Bao gồm:
+                - Chức vụ, họ tên và chữ ký của người có thẩm quyền ban hành luật.
+                - Bắt đầu bằng "Luật này đã được Quốc hội nước Cộng hòa xã hội chủ nghĩa Việt Nam khóa"
 
             Hướng dẫn trả lời:
-            1. Đọc kỹ câu hỏi và xác định các bộ luật được nhắc tới.
-            2. Tìm kiếm các văn bản pháp luật liên quan đến câu hỏi.
-            3. Trích dẫn chính xác các điều luật, đặc biệt chú ý đến điều luật được đề cập. Cần chú ý đến đối tượng hướng đến và các số liệu cụ thể.
-            4. Giải thích cụ thể và chi tiết nhất để người hỏi hiểu rõ về điều luật hoặc quy định đó. Nếu được, trích dẫn cụ thể từ bộ luật.
-            5. Nếu có thể, đưa ra ví dụ cụ thể hoặc tình huống áp dụng thực tế để minh họa.
-
+            1. Đọc kĩ câu hỏi và xác định bộ luật, điều luật
+            2. Trả lời ngắn gọn và chính xác nhất có thể. Đảm bảo sự dụng từ ngữ có trong văn bản.
+            3. Nếu có yêu cầu trích dẫn thì thực thiện trích dẫn đặt t định về mục đích, nguyên tắc, phạm vi áp dụng và quy định cơ bản về bảo hiểm y tế.rong "". 
+            
             Câu hỏi: {question}
-
             Câu trả lời:
         """
 
@@ -73,7 +108,7 @@ def chat_interface():
 
         # Chain
         rag_chain = (
-            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            {"context": retriever, "question": RunnablePassthrough()}
             | prompt
             | llm
             | StrOutputParser()
