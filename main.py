@@ -15,7 +15,7 @@ def load_documents():
     loader = WebBaseLoader(
         web_paths=("https://luatvietnam.vn/y-te/luat-bao-hiem-y-te-2008-39053-d1.html",),
         bs_kwargs=dict(
-            parse_only=bs4.SoupStrainer(class_=("the-document-body ndthaydoi noidungtracuu",))
+            parse_only=bs4.SoupStrainer(class_=("the-document-body ndthaydoi noidungtracuu", "docitem-5","docitem-11",))
         ),
     )
     docs = loader.load()
@@ -23,7 +23,7 @@ def load_documents():
 
 # Split documents
 def split_documents(docs):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, separators=['Điều'])
     splits = text_splitter.split_documents(docs)
     return splits
 
@@ -53,10 +53,10 @@ def chat_interface():
             Bạn đang truy vấn từ cơ sở dữ liệu văn bản pháp luật Việt Nam. Dưới đây là câu hỏi cần bạn trả lời dựa trên các tài liệu pháp lý có sẵn. Hãy cung cấp câu trả lời một cách chính xác và chi tiết nhất có thể, trích dẫn các điều luật hoặc quy định liên quan nếu cần thiết.
 
             Hướng dẫn trả lời:
-            1. Đọc kỹ câu hỏi và xác định các từ khóa quan trọng.
+            1. Đọc kỹ câu hỏi và xác định các bộ luật được nhắc tới.
             2. Tìm kiếm các văn bản pháp luật liên quan đến câu hỏi.
-            3. Trích dẫn chính xác các điều luật, quy định hoặc văn bản pháp lý có liên quan.
-            4. Giải thích ngắn gọn nhưng đầy đủ để người hỏi hiểu rõ về điều luật hoặc quy định đó.
+            3. Trích dẫn chính xác các điều luật, đặc biệt chú ý đến điều luật được đề cập. Cần chú ý đến đối tượng hướng đến và các số liệu cụ thể.
+            4. Giải thích cụ thể và chi tiết nhất để người hỏi hiểu rõ về điều luật hoặc quy định đó. Nếu được, trích dẫn cụ thể từ bộ luật.
             5. Nếu có thể, đưa ra ví dụ cụ thể hoặc tình huống áp dụng thực tế để minh họa.
 
             Câu hỏi: {question}
